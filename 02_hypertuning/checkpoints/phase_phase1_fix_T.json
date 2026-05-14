@@ -1,0 +1,26 @@
+[
+  {
+    "temperature": 10,
+    "alpha": 0.5,
+    "beta": 1.0,
+    "qwk": 0.9053946430816951
+  },
+  {
+    "temperature": 7,
+    "alpha": 0.5,
+    "beta": 1.0,
+    "qwk": 0.9024469183868711
+  },
+  {
+    "temperature": 3,
+    "alpha": 0.5,
+    "beta": 1.0,
+    "qwk": 0.9012211232060758
+  },
+  {
+    "temperature": 5,
+    "alpha": 0.5,
+    "beta": 1.0,
+    "qwk": 0.9000280273052459
+  }
+]

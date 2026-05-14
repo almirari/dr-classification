@@ -1,0 +1,74 @@
+[
+  {
+    "temperature": 10,
+    "alpha": 0.3,
+    "beta": 1.0,
+    "qwk": 0.8394217232086796
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.5,
+    "beta": 2.0,
+    "qwk": 0.8324901091914623
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.3,
+    "beta": 2.0,
+    "qwk": 0.8304710837556378
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.7,
+    "beta": 2.0,
+    "qwk": 0.8090759709217189
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.3,
+    "beta": 0.5,
+    "qwk": 0.8064975561334038
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.5,
+    "beta": 1.0,
+    "qwk": 0.7988196120575747
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.7,
+    "beta": 1.0,
+    "qwk": 0.7957250693515766
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.7,
+    "beta": 0.5,
+    "qwk": 0.7951301427371956
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.9,
+    "beta": 0.5,
+    "qwk": 0.7915289133835225
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.5,
+    "beta": 0.5,
+    "qwk": 0.7836347902266001
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.9,
+    "beta": 2.0,
+    "qwk": 0.7765611185060677
+  },
+  {
+    "temperature": 10,
+    "alpha": 0.9,
+    "beta": 1.0,
+    "qwk": 0.7596813064674098
+  }
+]
