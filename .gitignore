@@ -1,2 +1,4 @@
 03_kd_single/models/coral/teacher_resnet50_coral.pth
 03_kd_single/models/coral/teacher_resnet50_coral_resume.pth
+03_kd_single/models/ce/teacher_resnet50_coral.pth
+03_kd_single/models/ce/teacher_resnet50_coral_resume.pth
