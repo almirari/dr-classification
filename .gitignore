@@ -1,4 +1,8 @@
-03_kd_single/models/coral/teacher_resnet50_coral.pth
-03_kd_single/models/coral/teacher_resnet50_coral_resume.pth
-03_kd_single/models/ce/teacher_resnet50_coral.pth
-03_kd_single/models/ce/teacher_resnet50_coral_resume.pth
+dataset.zip
+_dataset_extracted/
+03_kd_single/models/coral
+03_kd_single/models/ce
+04_kd_multi/models/hybrid_resnet50_effnetb3
+04_kd_multi/models/hybrid_resnet50_resnet50
+04_kd_multi/models/nominal_resnet50_effnetb3
+04_kd_multi/models/ordinal_resnet50_effnetb3
