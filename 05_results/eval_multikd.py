@@ -307,6 +307,57 @@ def write_csv(csv_path, scenario_short, seed_results):
             w.writerow(row)
 
 
+# ── Summary formatting ────────────────────────────────────────────────────────
+def format_summary(summary_rows, title):
+    W2 = 90
+    lines = [
+        "=" * W2,
+        f"  {title}  (mean ± std across seeds)",
+        "=" * W2,
+    ]
+
+    for row in summary_rows:
+        lines += [
+            f"\n  Scenario : {row['scenario']}",
+            "",
+            f"  {'Metric':<14} {'Mean':>10} {'± Std':>10} {'Min':>10} {'Max':>10}",
+            "  " + "-" * 54,
+        ]
+        for label, key in [
+            ('QWK',      'qwk'),
+            ('Acc (%)',  'acc'),
+            ('MAE',      'mae'),
+            ('RMSE',     'rmse'),
+            ('Macro P',  'macro_p'),
+            ('Macro R',  'macro_r'),
+            ('Macro F1', 'macro_f1'),
+            ('Wtd P',    'wtd_p'),
+            ('Wtd R',    'wtd_r'),
+            ('Wtd F1',   'wtd_f1'),
+        ]:
+            vals = row[key]
+            lines.append(f"  {label:<14} {np.mean(vals):>10.4f} {np.std(vals):>10.4f} "
+                         f"{min(vals):>10.4f} {max(vals):>10.4f}")
+
+        lines += [
+            "",
+            f"  {'Class':<22} {'Precision':>16} {'Recall':>16} {'F1-Score':>16}",
+            "  " + "-" * 72,
+        ]
+        for cls in CLASS_NAMES:
+            pv = row['per_class'][cls]['p']
+            rv = row['per_class'][cls]['r']
+            fv = row['per_class'][cls]['f1']
+            pm, ps = np.mean(pv), np.std(pv)
+            rm, rs = np.mean(rv), np.std(rv)
+            fm, fs = np.mean(fv), np.std(fv)
+            lines.append(f"  {cls:<22} {pm:.4f} ± {ps:.4f}   "
+                         f"{rm:.4f} ± {rs:.4f}   {fm:.4f} ± {fs:.4f}")
+
+    lines += ["=" * W2, ""]
+    return "\n".join(lines)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -340,7 +391,7 @@ def main():
         best_qwks    = {}
 
         for seed in SEEDS:
-            fname     = f"{scenario['ckpt_prefix']}_seed{seed}_resume.pth"
+            fname     = f"{scenario['ckpt_prefix']}_seed{seed}_best.pth"
             ckpt_path = scenario['model_dir'] / fname
             print(f"\n  Seed {seed} — {fname}")
 
@@ -351,7 +402,7 @@ def main():
             except Exception as e:
                 print(f"  ⚠ Load failed: {e}"); continue
 
-            raw_bq = ckpt.get('best_qwk')
+            raw_bq = ckpt.get('best_qwk') or ckpt.get('qwk')
             best_qwks[seed] = f"{raw_bq:.4f}" if isinstance(raw_bq, float) else str(raw_bq)
             print(f"  Head : {head}  |  Training best val QWK: {best_qwks[seed]}")
             print(f"  Evaluating ...")
@@ -376,24 +427,30 @@ def main():
         print(f"\n  Saved → {out_path.name}")
         write_csv(csv_path, scenario['short'], seed_results)
 
-        mq, sq = mu_sd([r['qwk']      for r in seed_results])
-        ma, sa = mu_sd([r['acc']*100   for r in seed_results])
-        mf, sf = mu_sd([r['macro_f1']  for r in seed_results])
-        summary_rows.append({'scenario': scenario['short'],
-                             'qwk':(mq,sq), 'acc':(ma,sa), 'macro_f1':(mf,sf)})
+        # Collect all seed values for every metric into summary_rows
+        summary_rows.append({
+            'scenario': scenario['short'],
+            'qwk':      [r['qwk']       for r in seed_results],
+            'acc':      [r['acc']*100    for r in seed_results],
+            'mae':      [r['mae']        for r in seed_results],
+            'rmse':     [r['rmse']       for r in seed_results],
+            'macro_p':  [r['macro_p']    for r in seed_results],
+            'macro_r':  [r['macro_r']    for r in seed_results],
+            'macro_f1': [r['macro_f1']   for r in seed_results],
+            'wtd_p':    [r['wtd_p']      for r in seed_results],
+            'wtd_r':    [r['wtd_r']      for r in seed_results],
+            'wtd_f1':   [r['wtd_f1']     for r in seed_results],
+            'per_class': {
+                cls: {
+                    'p':  [r['per_class'][cls]['p']  for r in seed_results],
+                    'r':  [r['per_class'][cls]['r']  for r in seed_results],
+                    'f1': [r['per_class'][cls]['f1'] for r in seed_results],
+                } for cls in CLASS_NAMES
+            },
+        })
 
     if summary_rows:
-        lines = ["=" * W,
-                 "  SUMMARY — 04_kd_multi  (mean ± std across seeds)",
-                 "=" * W,
-                 f"  {'Scenario':<42} {'QWK':>16} {'Acc (%)':>12} {'Macro F1':>12}",
-                 "  " + "─" * (W-2)]
-        for row in summary_rows:
-            mq,sq = row['qwk']; ma,sa = row['acc']; mf,sf = row['macro_f1']
-            lines.append(f"  {row['scenario']:<42} {mq:.4f}±{sq:.4f}   "
-                         f"{ma:.2f}±{sa:.2f}   {mf:.4f}±{sf:.4f}")
-        lines += ["=" * W, ""]
-        summary = "\n".join(lines)
+        summary = format_summary(summary_rows, 'SUMMARY — 04_kd_multi')
         print("\n\n" + summary)
         (RESULTS_DIR / 'multi_kd_summary.txt').write_text(summary, encoding='utf-8')
         print(f"  Summary → multi_kd_summary.txt")
