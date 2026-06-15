@@ -1,5 +1,5 @@
 ==========================================================================================
-  SUMMARY — 04_kd_multi  (mean ± std across seeds)
+  SUMMARY — 04_kd_multi (students)  (mean ± std across seeds)
 ==========================================================================================
 
   Scenario : multi_nominal_resnet50_effnetb3

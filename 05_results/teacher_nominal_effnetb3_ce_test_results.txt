@@ -1,0 +1,27 @@
+============================================================================
+  Teacher — EfficientNetB3-CE  (nominal CE)
+  Notebook   : mkd_ce_resnet50_efficientnetb3.ipynb
+  Checkpoint : kd_teacher_efficientnet_b3.pth
+============================================================================
+  Architecture : EfficientNetB3  |  Head : CE
+
+  Metric              Value
+  --------------------------
+  QWK                0.8807
+  Accuracy           82.56%
+  MAE                0.2371
+  RMSE               0.6286
+  Macro P            0.6786
+  Macro R            0.6683
+  Macro F1           0.6704
+  Wtd P              0.8241
+  Wtd R              0.8256
+  Wtd F1             0.8237
+
+  Class                   Precision     Recall   F1-Score  Support
+  --------------------------------------------------------------
+  No DR                      0.9730     0.9945     0.9836      181
+  Mild                       0.6061     0.5405     0.5714       37
+  Moderate                   0.7723     0.7800     0.7761      100
+  Severe                     0.4167     0.5263     0.4651       19
+  Proliferative DR           0.6250     0.5000     0.5556       30

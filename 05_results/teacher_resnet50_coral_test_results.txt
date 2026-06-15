@@ -1,0 +1,27 @@
+============================================================================
+  Teacher — ResNet-50-CORAL  (shared)
+  Notebook : kd_coral_resnet50_mobilenetv3-small.ipynb
+  Checkpoint : teacher_resnet50_coral.pth
+============================================================================
+  Architecture : ResNet-50  |  Head : CORAL
+
+  Metric              Value
+  --------------------------
+  QWK                0.8818
+  Accuracy           78.47%
+  MAE                0.2589
+  RMSE               0.6065
+  Macro P            0.6613
+  Macro R            0.6253
+  Macro F1           0.5968
+  Wtd P              0.8197
+  Wtd R              0.7847
+  Wtd F1             0.7852
+
+  Class                   Precision     Recall   F1-Score  Support
+  --------------------------------------------------------------
+  No DR                      0.9889     0.9834     0.9861      181
+  Mild                       0.5610     0.6216     0.5897       37
+  Moderate                   0.7340     0.6900     0.7113      100
+  Severe                     0.2727     0.6316     0.3810       19
+  Proliferative DR           0.7500     0.2000     0.3158       30

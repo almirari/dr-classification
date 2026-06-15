@@ -21,24 +21,41 @@ RESULTS_DIR  = SCRIPT_DIR
 EXTRACT_DIR  = PROJECT_ROOT / '_dataset_extracted'
 SEEDS        = [33, 81, 5]
 
-SCENARIOS = [
+STUDENT_SCENARIOS = [
     {
-        'name':         'Single-Teacher KD — CE  (ResNet-50-CE → MobileNetV3-Small)',
-        'short':        'single_ce',
-        'notebook':     'kd_ce_resnet50_mobilenetv3-small.ipynb',
-        'model_dir':    PROJECT_ROOT / '03_kd_single' / 'models' / 'ce',
-        'ckpt_prefix':  None,        # seed{seed}_resume.pth
+        'name':        'Single-Teacher KD — CE  (ResNet-50-CE → MobileNetV3-Small)',
+        'short':       'single_ce',
+        'notebook':    'kd_ce_resnet50_mobilenetv3-small.ipynb',
+        'model_dir':   PROJECT_ROOT / '03_kd_single' / 'models' / 'ce',
+        'ckpt_prefix': None,        # seed{seed}_best.pth
     },
     {
-        'name':         'Single-Teacher KD — CORAL  (ResNet-50-CORAL → MobileNetV3-Small)',
-        'short':        'single_coral',
-        'notebook':     'kd_coral_resnet50_mobilenetv3-small.ipynb',
-        'model_dir':    PROJECT_ROOT / '03_kd_single' / 'models' / 'coral',
-        'ckpt_prefix':  'student',   # student_seed{seed}_resume.pth
+        'name':        'Single-Teacher KD — CORAL  (ResNet-50-CORAL → MobileNetV3-Small)',
+        'short':       'single_coral',
+        'notebook':    'kd_coral_resnet50_mobilenetv3-small.ipynb',
+        'model_dir':   PROJECT_ROOT / '03_kd_single' / 'models' / 'coral',
+        'ckpt_prefix': 'student',   # student_seed{seed}_best.pth
     },
 ]
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+TEACHER_SCENARIOS = [
+    {
+        'name':     'Teacher — ResNet-50-CE  (shared)',
+        'short':    'teacher_resnet50_ce',
+        'notebook': 'kd_ce_resnet50_mobilenetv3-small.ipynb',
+        'ckpt':     PROJECT_ROOT / '03_kd_single' / 'models' / 'ce'
+                    / 'teacher_resnet50_shared.pth',
+    },
+    {
+        'name':     'Teacher — ResNet-50-CORAL  (shared)',
+        'short':    'teacher_resnet50_coral',
+        'notebook': 'kd_coral_resnet50_mobilenetv3-small.ipynb',
+        'ckpt':     PROJECT_ROOT / '03_kd_single' / 'models' / 'coral'
+                    / 'teacher_resnet50_coral.pth',
+    },
+]
+
+
 CLASS_NAMES = ['No DR', 'Mild', 'Moderate', 'Severe', 'Proliferative DR']
 NUM_CLASSES = len(CLASS_NAMES)
 BATCH_SIZE  = 32
@@ -47,7 +64,6 @@ _MEAN       = [0.485, 0.456, 0.406]
 _STD        = [0.229, 0.224, 0.225]
 
 
-# ── Dataset extraction ────────────────────────────────────────────────────────
 def get_dataset_dir():
     if EXTRACT_DIR.exists():
         csvs = list(EXTRACT_DIR.rglob('test_split.csv'))
@@ -67,7 +83,6 @@ def get_dataset_dir():
     return csvs[0].parent
 
 
-# ── Dataset ───────────────────────────────────────────────────────────────────
 class AptosDataset(Dataset):
     def __init__(self, df, image_dir, transform=None):
         self.df        = df.reset_index(drop=True)
@@ -87,7 +102,6 @@ class AptosDataset(Dataset):
         return img, torch.tensor(int(row['diagnosis']), dtype=torch.long)
 
 
-# ── Model architectures ───────────────────────────────────────────────────────
 class CoralHead(nn.Module):
     def __init__(self, in_features, num_classes):
         super().__init__()
@@ -111,6 +125,20 @@ def get_mobilenet_coral():
     return m
 
 
+def get_resnet50_ce():
+    m = models.resnet50(weights=None)
+    m.fc = nn.Linear(m.fc.in_features, NUM_CLASSES)
+    return m
+
+
+def get_resnet50_coral():
+    m = models.resnet50(weights=None)
+    in_f = m.fc.in_features
+    m.fc = nn.Identity()
+    m.coral_head = CoralHead(in_f, NUM_CLASSES)
+    return m
+
+
 def load_student(ckpt_path):
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     sd   = ckpt['model_state_dict']
@@ -122,23 +150,40 @@ def load_student(ckpt_path):
         except RuntimeError:
             continue
     raise RuntimeError(
-        f"Neither CE nor CORAL head matched.\n"
+        f"Neither CE nor CORAL student head matched.\n"
         f"First 10 keys: {list(sd.keys())[:10]}\nPath: {ckpt_path}"
     )
 
 
-# ── Inference ─────────────────────────────────────────────────────────────────
+def load_teacher(ckpt_path):
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    sd = (ckpt.get('model_state_dict')
+          or ckpt.get('state_dict')
+          or ckpt)   # bare state_dict
+    if not isinstance(sd, dict):
+        raise RuntimeError(f"Unexpected checkpoint format at {ckpt_path}")
+    for builder, label in [(get_resnet50_ce, 'CE'), (get_resnet50_coral, 'CORAL')]:
+        m = builder().to(device)
+        try:
+            m.load_state_dict(sd, strict=True)
+            return m, label, ckpt
+        except RuntimeError:
+            continue
+    raise RuntimeError(
+        f"Neither CE nor CORAL teacher head matched.\n"
+        f"First 10 keys: {list(sd.keys())[:10]}\nPath: {ckpt_path}"
+    )
+
+
 def predict_batch(model, imgs, head):
+    """Works for both MobileNetV3-Small and ResNet-50."""
     if head == 'CE':
         return model(imgs).argmax(dim=1)
-    x = model.features(imgs)
-    x = model.avgpool(x)
-    x = torch.flatten(x, 1)
-    x = model.classifier(x)
-    return (torch.sigmoid(model.coral_head(x)) > 0.5).sum(dim=1).long()
+    # CORAL: run standard forward (fc is Identity), then coral_head
+    feats = model(imgs)   # shape (B, in_features) because fc = Identity()
+    return (torch.sigmoid(model.coral_head(feats)) > 0.5).sum(dim=1).long()
 
 
-# ── Evaluation ────────────────────────────────────────────────────────────────
 def evaluate(model, head, loader):
     model.eval()
     preds_all, labels_all = [], []
@@ -165,16 +210,15 @@ def evaluate(model, head, loader):
         'wtd_p':    report['weighted avg']['precision'],
         'wtd_r':    report['weighted avg']['recall'],
         'wtd_f1':   report['weighted avg']['f1-score'],
-        'per_class':{ cls: {
-            'p':  report[cls]['precision'],
-            'r':  report[cls]['recall'],
-            'f1': report[cls]['f1-score'],
+        'per_class': {cls: {
+            'p':       report[cls]['precision'],
+            'r':       report[cls]['recall'],
+            'f1':      report[cls]['f1-score'],
             'support': int(report[cls]['support']),
         } for cls in CLASS_NAMES},
     }
 
 
-# ── Formatting ────────────────────────────────────────────────────────────────
 def mu_sd(v): return np.mean(v), np.std(v)
 W = 76
 
@@ -190,7 +234,6 @@ def format_results(scenario, seed_results, best_qwks):
           f"  Notebook : {scenario['notebook']}",
           "=" * W]
 
-    # ── Per-seed ──────────────────────────────────────────────────────────────
     for r in seed_results:
         bq = best_qwks.get(r['seed'], 'N/A')
         L += section(f"Seed {r['seed']}  (training best val QWK: {bq})")
@@ -218,7 +261,6 @@ def format_results(scenario, seed_results, best_qwks):
             L.append(f"  {cls:<22} {pc['p']:>10.4f} {pc['r']:>10.4f} "
                      f"{pc['f1']:>10.4f} {pc['support']:>8d}")
 
-    # ── Averaged across seeds ─────────────────────────────────────────────────
     if len(seed_results) > 1:
         L += section(f"AVERAGED ACROSS {len(seed_results)} SEEDS  "
                      f"(seeds: {[r['seed'] for r in seed_results]})")
@@ -258,31 +300,114 @@ def format_results(scenario, seed_results, best_qwks):
     return "\n".join(L)
 
 
-# ── CSV ───────────────────────────────────────────────────────────────────────
+def format_teacher_results(scenario, res):
+    """Format results for a single-checkpoint teacher (no seed loop)."""
+    L = []
+    L += ["=" * W,
+          f"  {scenario['name']}",
+          f"  Notebook : {scenario['notebook']}",
+          f"  Checkpoint : {Path(scenario['ckpt']).name}",
+          "=" * W]
+    L += [
+        f"  Architecture : {res['arch']}  |  Head : {res['head']}",
+        "",
+        f"  {'Metric':<14} {'Value':>10}",
+        "  " + "-" * 26,
+        f"  {'QWK':<14} {res['qwk']:>10.4f}",
+        f"  {'Accuracy':<14} {res['acc']*100:>9.2f}%",
+        f"  {'MAE':<14} {res['mae']:>10.4f}",
+        f"  {'RMSE':<14} {res['rmse']:>10.4f}",
+        f"  {'Macro P':<14} {res['macro_p']:>10.4f}",
+        f"  {'Macro R':<14} {res['macro_r']:>10.4f}",
+        f"  {'Macro F1':<14} {res['macro_f1']:>10.4f}",
+        f"  {'Wtd P':<14} {res['wtd_p']:>10.4f}",
+        f"  {'Wtd R':<14} {res['wtd_r']:>10.4f}",
+        f"  {'Wtd F1':<14} {res['wtd_f1']:>10.4f}",
+        "",
+        f"  {'Class':<22} {'Precision':>10} {'Recall':>10} {'F1-Score':>10} {'Support':>8}",
+        "  " + "-" * 62,
+    ]
+    for cls in CLASS_NAMES:
+        pc = res['per_class'][cls]
+        L.append(f"  {cls:<22} {pc['p']:>10.4f} {pc['r']:>10.4f} "
+                 f"{pc['f1']:>10.4f} {pc['support']:>8d}")
+    L.append("")
+    return "\n".join(L)
+
+
+def format_teacher_summary(teacher_results, title):
+    """Aggregated view of all teacher results: full metrics + per-class P/R/F1."""
+    W2 = 90
+    lines = ["=" * W2, f"  {title}", "=" * W2]
+
+    for r in teacher_results:
+        arch = r.get('arch', '')
+        tag  = f"{arch}-{r['head']}" if arch else r['head']
+        sep  = "─" * max(0, W2 - 8 - len(r['short']) - len(tag))
+        lines += [
+            f"\n  ── {r['short']}  ({tag}) {sep}",
+            "",
+            f"  {'Metric':<14} {'Value':>10}",
+            "  " + "-" * 26,
+            f"  {'QWK':<14} {r['qwk']:>10.4f}",
+            f"  {'Accuracy':<14} {r['acc']*100:>9.2f}%",
+            f"  {'MAE':<14} {r['mae']:>10.4f}",
+            f"  {'RMSE':<14} {r['rmse']:>10.4f}",
+            f"  {'Macro P':<14} {r['macro_p']:>10.4f}",
+            f"  {'Macro R':<14} {r['macro_r']:>10.4f}",
+            f"  {'Macro F1':<14} {r['macro_f1']:>10.4f}",
+            f"  {'Wtd P':<14} {r['wtd_p']:>10.4f}",
+            f"  {'Wtd R':<14} {r['wtd_r']:>10.4f}",
+            f"  {'Wtd F1':<14} {r['wtd_f1']:>10.4f}",
+            "",
+            f"  {'Class':<22} {'Precision':>10} {'Recall':>10} {'F1-Score':>10} {'Support':>8}",
+            "  " + "-" * 62,
+        ]
+        for cls in CLASS_NAMES:
+            pc = r['per_class'][cls]
+            lines.append(f"  {cls:<22} {pc['p']:>10.4f} {pc['r']:>10.4f} "
+                         f"{pc['f1']:>10.4f} {pc['support']:>8d}")
+
+    lines += ["", "=" * W2, ""]
+    return "\n".join(lines)
+
+
+def _cls_keys():
+    return [(cls,
+             f'p_{cls.lower().replace(" ","_")}',
+             f'r_{cls.lower().replace(" ","_")}',
+             f'f1_{cls.lower().replace(" ","_")}') for cls in CLASS_NAMES]
+
+
+def _csv_fieldnames():
+    return (['scenario', 'seed', 'head', 'qwk', 'acc_pct', 'mae', 'rmse',
+             'macro_p', 'macro_r', 'macro_f1', 'wtd_p', 'wtd_r', 'wtd_f1']
+            + [k for _, p, r, f in _cls_keys() for k in (p, r, f)])
+
+
 def write_csv(csv_path, scenario_short, seed_results):
-    exists = csv_path.exists()
-    cls_keys = [(cls, f'p_{cls.lower().replace(" ","_")}',
-                      f'r_{cls.lower().replace(" ","_")}',
-                      f'f1_{cls.lower().replace(" ","_")}') for cls in CLASS_NAMES]
-    fieldnames = (['scenario','seed','head','qwk','acc_pct','mae','rmse',
-                   'macro_p','macro_r','macro_f1','wtd_p','wtd_r','wtd_f1']
-                  + [k for _,p,r,f in cls_keys for k in (p,r,f)])
+    exists    = csv_path.exists()
+    cls_keys  = _cls_keys()
+    fieldnames = _csv_fieldnames()
     with open(csv_path, 'a', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
-        if not exists: w.writeheader()
+        if not exists:
+            w.writeheader()
         for r in seed_results:
             row = {
-                'scenario': scenario_short, 'seed': r['seed'], 'head': r['head'],
-                'qwk':      round(r['qwk'],       4),
-                'acc_pct':  round(r['acc']*100,   4),
-                'mae':      round(r['mae'],        4),
-                'rmse':     round(r['rmse'],       4),
-                'macro_p':  round(r['macro_p'],    4),
-                'macro_r':  round(r['macro_r'],    4),
-                'macro_f1': round(r['macro_f1'],   4),
-                'wtd_p':    round(r['wtd_p'],      4),
-                'wtd_r':    round(r['wtd_r'],      4),
-                'wtd_f1':   round(r['wtd_f1'],     4),
+                'scenario': scenario_short,
+                'seed':     r['seed'],
+                'head':     r['head'],
+                'qwk':      round(r['qwk'],      4),
+                'acc_pct':  round(r['acc']*100,  4),
+                'mae':      round(r['mae'],       4),
+                'rmse':     round(r['rmse'],      4),
+                'macro_p':  round(r['macro_p'],   4),
+                'macro_r':  round(r['macro_r'],   4),
+                'macro_f1': round(r['macro_f1'],  4),
+                'wtd_p':    round(r['wtd_p'],     4),
+                'wtd_r':    round(r['wtd_r'],     4),
+                'wtd_f1':   round(r['wtd_f1'],    4),
             }
             for cls, pk, rk, fk in cls_keys:
                 row[pk] = round(r['per_class'][cls]['p'],  4)
@@ -291,7 +416,11 @@ def write_csv(csv_path, scenario_short, seed_results):
             w.writerow(row)
 
 
-# ── Summary formatting ────────────────────────────────────────────────────────
+def write_csv_teacher(csv_path, scenario_short, res):
+    """Write a single teacher row (seed='shared', no seed loop)."""
+    write_csv(csv_path, scenario_short, [{**res, 'seed': 'shared'}])
+
+
 def format_summary(summary_rows, title):
     W2 = 90
     lines = [
@@ -342,14 +471,14 @@ def format_summary(summary_rows, title):
     return "\n".join(lines)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = RESULTS_DIR / 'single_kd_results.csv'
-    if csv_path.exists(): csv_path.unlink()
+    if csv_path.exists():
+        csv_path.unlink()
 
     print("\n" + "=" * W)
-    print("  03_kd_single — Student Evaluation")
+    print("  03_kd_single — Student + Teacher Evaluation")
     print("=" * W)
     print(f"  Project root : {PROJECT_ROOT}")
     print(f"  Results dir  : {RESULTS_DIR}")
@@ -366,7 +495,12 @@ def main():
 
     summary_rows = []
 
-    for scenario in SCENARIOS:
+    # ══ STUDENT MODELS ════════════════════════════════════════════════════════
+    print(f"\n\n{'#'*W}")
+    print("  STUDENT MODELS")
+    print(f"{'#'*W}")
+
+    for scenario in STUDENT_SCENARIOS:
         print(f"\n\n{'='*W}")
         print(f"  {scenario['name']}")
         print(f"{'='*W}")
@@ -412,7 +546,6 @@ def main():
         print(f"\n  Saved → {out_path.name}")
         write_csv(csv_path, scenario['short'], seed_results)
 
-        # Collect all seed values for every metric into summary_rows
         summary_rows.append({
             'scenario': scenario['short'],
             'qwk':      [r['qwk']       for r in seed_results],
@@ -435,10 +568,62 @@ def main():
         })
 
     if summary_rows:
-        summary = format_summary(summary_rows, 'SUMMARY — 03_kd_single')
+        summary = format_summary(summary_rows, 'SUMMARY — 03_kd_single (students)')
         print("\n\n" + summary)
         (RESULTS_DIR / 'single_kd_summary.txt').write_text(summary, encoding='utf-8')
         print(f"  Summary → single_kd_summary.txt")
+
+    # ══ TEACHER MODELS ════════════════════════════════════════════════════════
+    print(f"\n\n{'#'*W}")
+    print("  TEACHER MODELS")
+    print(f"{'#'*W}")
+
+    teacher_results = []
+
+    for scenario in TEACHER_SCENARIOS:
+        print(f"\n\n{'='*W}")
+        print(f"  {scenario['name']}")
+        print(f"{'='*W}")
+
+        ckpt_path = Path(scenario['ckpt'])
+        print(f"\n  Checkpoint — {ckpt_path.name}")
+
+        if not ckpt_path.exists():
+            print(f"  ⚠ Not found: {ckpt_path}"); continue
+        try:
+            model, head, ckpt = load_teacher(ckpt_path)
+        except Exception as e:
+            print(f"  ⚠ Load failed: {e}"); continue
+
+        print(f"  Head : {head}")
+        print(f"  Evaluating ...")
+
+        model.eval()
+        res          = evaluate(model, head, test_loader)
+        res['head']  = head
+        res['arch']  = 'ResNet-50'          # all single-KD teachers are ResNet-50
+        res['short'] = scenario['short']
+        del model
+
+        print(f"  QWK={res['qwk']:.4f} | Acc={res['acc']*100:.2f}% | "
+              f"MAE={res['mae']:.4f} | RMSE={res['rmse']:.4f}")
+        sys.stdout.flush()
+
+        block    = format_teacher_results(scenario, res)
+        out_path = RESULTS_DIR / f"{scenario['short']}_test_results.txt"
+        out_path.write_text(block, encoding='utf-8')
+        print(f"\n  Saved → {out_path.name}")
+        write_csv_teacher(csv_path, scenario['short'], res)
+
+        teacher_results.append(res)
+
+    if teacher_results:
+        t_summary = format_teacher_summary(
+            teacher_results, 'TEACHER SUMMARY — 03_kd_single')
+        print("\n\n" + t_summary)
+        (RESULTS_DIR / 'single_kd_teacher_summary.txt').write_text(
+            t_summary, encoding='utf-8')
+        print(f"  Teacher summary → single_kd_teacher_summary.txt")
 
     print(f"  CSV     → {csv_path.name}\n\nDone.\n")
 
