@@ -19,6 +19,14 @@
   Wtd R              0.8093
   Wtd F1             0.8133
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)            1.519
+  Size (MB)             5.925
+  Latency (ms)          6.521
+  Throughput/s         153.34
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9780     0.9834     0.9807      181
@@ -42,6 +50,14 @@
   Wtd P              0.8324
   Wtd R              0.8256
   Wtd F1             0.8241
+
+  Efficiency            Value
+  ----------------------------
+  Params (M)            1.519
+  Size (MB)             5.925
+  Latency (ms)          6.273
+  Throughput/s         159.41
+  Peak mem (MB)           nan
 
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
@@ -67,6 +83,14 @@
   Wtd R              0.8065
   Wtd F1             0.8043
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)            1.519
+  Size (MB)             5.925
+  Latency (ms)          6.379
+  Throughput/s         156.75
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9730     0.9945     0.9836      181
@@ -89,6 +113,14 @@
   Wtd P              0.8258     0.0068     0.8164     0.8324
   Wtd R              0.8138     0.0084     0.8065     0.8256
   Wtd F1             0.8139     0.0081     0.8043     0.8241
+
+  Efficiency             Mean        ± Std          Min          Max
+  --------------------------------------------------------------
+  Params (M)           1.5189       0.0000       1.5189       1.5189
+  Size (MB)            5.9249       0.0001       5.9247       5.9249
+  Latency (ms)         6.3913       0.1016       6.2733       6.5213
+  Throughput/s       156.5021       2.4813     153.3447     159.4069
+  Peak mem (MB)           nan          nan          nan          nan
 
   Class                         Precision           Recall         F1-Score
   ------------------------------------------------------------------------

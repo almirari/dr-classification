@@ -6,3 +6,4 @@ _dataset_extracted/
 04_kd_multi/models/hybrid_resnet50_resnet50
 04_kd_multi/models/nominal_resnet50_effnetb3
 04_kd_multi/models/ordinal_resnet50_effnetb3
+

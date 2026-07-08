@@ -17,6 +17,14 @@
   Wtd R              0.8447
   Wtd F1             0.8435
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)           23.518
+  Size (MB)            90.022
+  Latency (ms)         70.486
+  Throughput/s          14.19
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9835     0.9890     0.9862      181
@@ -39,6 +47,14 @@
   Wtd P              0.8241
   Wtd R              0.8256
   Wtd F1             0.8237
+
+  Efficiency            Value
+  ----------------------------
+  Params (M)           10.704
+  Size (MB)            41.373
+  Latency (ms)         77.711
+  Throughput/s          12.87
+  Peak mem (MB)           nan
 
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
@@ -63,6 +79,14 @@
   Wtd R              0.7738
   Wtd F1             0.7777
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)           23.510
+  Size (MB)            89.993
+  Latency (ms)         98.636
+  Throughput/s          10.14
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9889     0.9834     0.9861      181
@@ -85,6 +109,14 @@
   Wtd P              0.8515
   Wtd R              0.8420
   Wtd F1             0.8375
+
+  Efficiency            Value
+  ----------------------------
+  Params (M)           10.698
+  Size (MB)            41.353
+  Latency (ms)         59.490
+  Throughput/s          16.81
+  Peak mem (MB)           nan
 
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
@@ -109,6 +141,14 @@
   Wtd R              0.8147
   Wtd F1             0.8093
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)           23.518
+  Size (MB)            90.024
+  Latency (ms)         84.393
+  Throughput/s          11.85
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9728     0.9890     0.9808      181
@@ -131,6 +171,14 @@
   Wtd P              0.8515
   Wtd R              0.8420
   Wtd F1             0.8375
+
+  Efficiency            Value
+  ----------------------------
+  Params (M)           10.698
+  Size (MB)            41.353
+  Latency (ms)         58.125
+  Throughput/s          17.20
+  Peak mem (MB)           nan
 
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
@@ -155,6 +203,14 @@
   Wtd R              0.8311
   Wtd F1             0.8268
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)           23.518
+  Size (MB)            90.024
+  Latency (ms)         87.597
+  Throughput/s          11.42
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9731     1.0000     0.9864      181
@@ -178,6 +234,14 @@
   Wtd R              0.7738
   Wtd F1             0.7777
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)           23.510
+  Size (MB)            89.994
+  Latency (ms)         83.909
+  Throughput/s          11.92
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9889     0.9834     0.9861      181
@@ -185,5 +249,19 @@
   Moderate                   0.7792     0.6000     0.6780      100
   Severe                     0.2889     0.6842     0.4062       19
   Proliferative DR           0.7000     0.2333     0.3500       30
+
+==========================================================================================
+  TEACHER EFFICIENCY RANKING  (by latency, ascending)
+==========================================================================================
+  #   Scenario                          Params(M)   Size(MB)    Lat(ms)    Thr/s    Mem(MB)
+  ------------------------------------------------------------------------------------------
+  1   teacher_hybrid_re_effnetb3_coral     10.698     41.353     58.125    17.20        nan
+  2   teacher_ordinal_effnetb3_coral       10.698     41.353     59.490    16.81        nan
+  3   teacher_nominal_resnet50_ce          23.518     90.022     70.486    14.19        nan
+  4   teacher_nominal_effnetb3_ce          10.704     41.373     77.711    12.87        nan
+  5   teacher_hybrid_rr_resnet50_coral     23.510     89.994     83.909    11.92        nan
+  6   teacher_hybrid_re_resnet50_ce        23.518     90.024     84.393    11.85        nan
+  7   teacher_hybrid_rr_resnet50_ce        23.518     90.024     87.597    11.42        nan
+  8   teacher_ordinal_resnet50_coral       23.510     89.993     98.636    10.14        nan
 
 ==========================================================================================

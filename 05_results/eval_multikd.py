@@ -1,4 +1,4 @@
-import sys, zipfile, csv
+import sys, zipfile, csv, os, time, gc
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -9,6 +9,12 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms, models
 from PIL import Image
 from sklearn.metrics import cohen_kappa_score, classification_report
+
+try:
+    import resource  # Linux/Mac only
+    HAS_RESOURCE = True
+except ImportError:
+    HAS_RESOURCE = False
 
 try:
     SCRIPT_DIR = Path(__file__).resolve().parent
@@ -107,6 +113,9 @@ TEACHER_SCENARIOS = [
 CLASS_NAMES = ['No DR', 'Mild', 'Moderate', 'Severe', 'Proliferative DR']
 NUM_CLASSES = len(CLASS_NAMES)
 BATCH_SIZE  = 32
+# Kept on CPU for ALL scenarios (students + teachers) so latency / memory
+# numbers are directly comparable across architectures. Do not switch to
+# CUDA here unless you also re-measure every other script on the same device.
 device      = torch.device('cpu')
 _MEAN       = [0.485, 0.456, 0.406]
 _STD        = [0.229, 0.224, 0.225]
@@ -258,16 +267,64 @@ def predict_batch(model, imgs, head):
     return (torch.sigmoid(model.coral_head(feats)) > 0.5).sum(dim=1).long()
 
 
-def evaluate(model, head, loader):
+# ── Efficiency measurement helpers ───────────────────────────────────────────
+
+def count_parameters(model):
+    total     = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total, trainable
+
+
+def get_checkpoint_size_mb(ckpt_path):
+    if ckpt_path is None or not Path(ckpt_path).exists():
+        return float('nan')
+    return os.path.getsize(ckpt_path) / (1024 ** 2)
+
+
+def reset_peak_memory():
+    gc.collect()
+    if device.type == 'cuda':
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.empty_cache()
+
+
+def get_peak_memory_mb():
+    if device.type == 'cuda':
+        return torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+    if HAS_RESOURCE:
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # ru_maxrss is KB on Linux, bytes on macOS
+        return peak / 1024 if sys.platform.startswith('linux') else peak / (1024 ** 2)
+    return float('nan')
+
+
+def evaluate(model, head, loader, ckpt_path=None):
     model.eval()
     preds_all, labels_all = [], []
     n = len(loader)
+
+    total_params, trainable_params = count_parameters(model)
+
+    # Warm-up pass (not timed) so lazy init / caching doesn't skew latency
+    warm_imgs, _ = next(iter(loader))
+    with torch.no_grad():
+        _ = model(warm_imgs.to(device))
+
+    reset_peak_memory()
+    t0 = time.perf_counter()
     with torch.no_grad():
         for i, (imgs, labels) in enumerate(loader):
             preds_all.extend(predict_batch(model, imgs.to(device), head).cpu().numpy())
             labels_all.extend(labels.numpy())
             print(f"\r    batch {i+1}/{n}", end='', flush=True)
+    elapsed_s = time.perf_counter() - t0
     print()
+
+    peak_mem_mb = get_peak_memory_mb()
+    n_samples   = len(labels_all)
+    ms_per_img  = (elapsed_s / n_samples) * 1000.0
+    throughput  = n_samples / elapsed_s
+
     preds  = np.array(preds_all)
     labels = np.array(labels_all)
     report = classification_report(
@@ -290,6 +347,13 @@ def evaluate(model, head, loader):
             'f1':      report[cls]['f1-score'],
             'support': int(report[cls]['support']),
         } for cls in CLASS_NAMES},
+        'params_total':     total_params,
+        'params_trainable': trainable_params,
+        'params_m':         total_params / 1e6,
+        'infer_ms_per_img':  ms_per_img,
+        'throughput_img_s':  throughput,
+        'peak_mem_mb':       peak_mem_mb,
+        'model_size_mb':     get_checkpoint_size_mb(ckpt_path),
     }
 
 
@@ -299,6 +363,15 @@ W = 76
 
 def section(title):
     return [f"\n  ── {title} " + "─" * max(0, W - 6 - len(title))]
+
+
+EFF_METRICS = [
+    ('Params (M)',    'params_m',         '{:>12.3f}'),
+    ('Size (MB)',     'model_size_mb',    '{:>12.3f}'),
+    ('Latency (ms)',  'infer_ms_per_img', '{:>12.3f}'),
+    ('Throughput/s',  'throughput_img_s', '{:>12.2f}'),
+    ('Peak mem (MB)', 'peak_mem_mb',      '{:>12.2f}'),
+]
 
 
 def format_results(scenario, seed_results, best_qwks):
@@ -326,6 +399,13 @@ def format_results(scenario, seed_results, best_qwks):
             f"  {'Wtd P':<14} {r['wtd_p']:>10.4f}",
             f"  {'Wtd R':<14} {r['wtd_r']:>10.4f}",
             f"  {'Wtd F1':<14} {r['wtd_f1']:>10.4f}",
+            "",
+            f"  {'Efficiency':<14} {'Value':>12}",
+            "  " + "-" * 28,
+        ]
+        for label, key, fmt in EFF_METRICS:
+            L.append(f"  {label:<14} " + fmt.format(r[key]))
+        L += [
             "",
             f"  {'Class':<22} {'Precision':>10} {'Recall':>10} {'F1-Score':>10} {'Support':>8}",
             "  " + "-" * 62,
@@ -359,6 +439,15 @@ def format_results(scenario, seed_results, best_qwks):
             m, s = mu_sd(vals)
             L.append(f"  {label:<14} {m:>10.4f} {s:>10.4f} "
                      f"{min(vals):>10.4f} {max(vals):>10.4f}")
+
+        L += ["",
+              f"  {'Efficiency':<14} {'Mean':>12} {'± Std':>12} {'Min':>12} {'Max':>12}",
+              "  " + "-" * 62]
+        for label, key, _ in EFF_METRICS:
+            vals = [r[key] for r in seed_results]
+            m, s = mu_sd(vals)
+            L.append(f"  {label:<14} {m:>12.4f} {s:>12.4f} "
+                     f"{min(vals):>12.4f} {max(vals):>12.4f}")
 
         L += ["",
               f"  {'Class':<22} {'Precision':>16} {'Recall':>16} {'F1-Score':>16}",
@@ -398,6 +487,13 @@ def format_teacher_results(scenario, res):
         f"  {'Wtd R':<14} {res['wtd_r']:>10.4f}",
         f"  {'Wtd F1':<14} {res['wtd_f1']:>10.4f}",
         "",
+        f"  {'Efficiency':<14} {'Value':>12}",
+        "  " + "-" * 28,
+    ]
+    for label, key, fmt in EFF_METRICS:
+        L.append(f"  {label:<14} " + fmt.format(res[key]))
+    L += [
+        "",
         f"  {'Class':<22} {'Precision':>10} {'Recall':>10} {'F1-Score':>10} {'Support':>8}",
         "  " + "-" * 62,
     ]
@@ -434,6 +530,13 @@ def format_teacher_summary(teacher_results, title):
             f"  {'Wtd R':<14} {r['wtd_r']:>10.4f}",
             f"  {'Wtd F1':<14} {r['wtd_f1']:>10.4f}",
             "",
+            f"  {'Efficiency':<14} {'Value':>12}",
+            "  " + "-" * 28,
+        ]
+        for label, key, fmt in EFF_METRICS:
+            lines.append(f"  {label:<14} " + fmt.format(r[key]))
+        lines += [
+            "",
             f"  {'Class':<22} {'Precision':>10} {'Recall':>10} {'F1-Score':>10} {'Support':>8}",
             "  " + "-" * 62,
         ]
@@ -442,18 +545,38 @@ def format_teacher_summary(teacher_results, title):
             lines.append(f"  {cls:<22} {pc['p']:>10.4f} {pc['r']:>10.4f} "
                          f"{pc['f1']:>10.4f} {pc['support']:>8d}")
 
+    # Cross-teacher efficiency ranking (smaller/faster is better)
+    lines += ["", "=" * W2,
+              "  TEACHER EFFICIENCY RANKING  (by latency, ascending)", "=" * W2,
+              f"  {'#':<3} {'Scenario':<32} {'Params(M)':>10} {'Size(MB)':>10} "
+              f"{'Lat(ms)':>10} {'Thr/s':>8} {'Mem(MB)':>10}",
+              "  " + "-" * 90]
+    for i, r in enumerate(sorted(teacher_results, key=lambda x: x['infer_ms_per_img']), 1):
+        lines.append(f"  {i:<3} {r['short']:<32} {r['params_m']:>10.3f} "
+                     f"{r['model_size_mb']:>10.3f} {r['infer_ms_per_img']:>10.3f} "
+                     f"{r['throughput_img_s']:>8.2f} {r['peak_mem_mb']:>10.2f}")
+
     lines += ["", "=" * W2, ""]
     return "\n".join(lines)
 
 
+def _cls_keys():
+    return [(cls,
+             f'p_{cls.lower().replace(" ","_")}',
+             f'r_{cls.lower().replace(" ","_")}',
+             f'f1_{cls.lower().replace(" ","_")}') for cls in CLASS_NAMES]
+
+
+EFF_CSV_KEYS = ['params_total', 'params_m', 'model_size_mb',
+                'infer_ms_per_img', 'throughput_img_s', 'peak_mem_mb']
+
+
 def write_csv(csv_path, scenario_short, seed_results):
     exists   = csv_path.exists()
-    cls_keys = [(cls,
-                 f'p_{cls.lower().replace(" ","_")}',
-                 f'r_{cls.lower().replace(" ","_")}',
-                 f'f1_{cls.lower().replace(" ","_")}') for cls in CLASS_NAMES]
+    cls_keys = _cls_keys()
     fieldnames = (['scenario', 'seed', 'head', 'qwk', 'acc_pct', 'mae', 'rmse',
                    'macro_p', 'macro_r', 'macro_f1', 'wtd_p', 'wtd_r', 'wtd_f1']
+                  + EFF_CSV_KEYS
                   + [k for _, p, r, f in cls_keys for k in (p, r, f)])
     with open(csv_path, 'a', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -475,6 +598,8 @@ def write_csv(csv_path, scenario_short, seed_results):
                 'wtd_r':    round(r['wtd_r'],     4),
                 'wtd_f1':   round(r['wtd_f1'],    4),
             }
+            for k in EFF_CSV_KEYS:
+                row[k] = round(r[k], 4) if isinstance(r[k], float) else r[k]
             for cls, pk, rk, fk in cls_keys:
                 row[pk] = round(r['per_class'][cls]['p'],  4)
                 row[rk] = round(r['per_class'][cls]['r'],  4)
@@ -517,6 +642,14 @@ def format_summary(summary_rows, title):
             lines.append(f"  {label:<14} {np.mean(vals):>10.4f} {np.std(vals):>10.4f} "
                          f"{min(vals):>10.4f} {max(vals):>10.4f}")
 
+        lines += ["",
+                  f"  {'Efficiency':<14} {'Mean':>12} {'± Std':>12} {'Min':>12} {'Max':>12}",
+                  "  " + "-" * 62]
+        for label, key, _ in EFF_METRICS:
+            vals = row[key]
+            lines.append(f"  {label:<14} {np.mean(vals):>12.4f} {np.std(vals):>12.4f} "
+                         f"{min(vals):>12.4f} {max(vals):>12.4f}")
+
         lines += [
             "",
             f"  {'Class':<22} {'Precision':>16} {'Recall':>16} {'F1-Score':>16}",
@@ -532,8 +665,23 @@ def format_summary(summary_rows, title):
             lines.append(f"  {cls:<22} {pm:.4f} ± {ps:.4f}   "
                          f"{rm:.4f} ± {rs:.4f}   {fm:.4f} ± {fs:.4f}")
 
+    # Cross-scenario efficiency ranking table (by latency, ascending)
+    lines += ["", "=" * W2,
+              "  STUDENT EFFICIENCY RANKING  (by mean latency, ascending)", "=" * W2,
+              f"  {'#':<3} {'Scenario':<32} {'Params(M)':>10} {'Size(MB)':>10} "
+              f"{'Lat(ms)':>10} {'Thr/s':>8} {'Mem(MB)':>10} {'QWK':>8}",
+              "  " + "-" * 96]
+    for i, row in enumerate(sorted(summary_rows,
+                                   key=lambda r: np.mean(r['infer_ms_per_img'])), 1):
+        lines.append(
+            f"  {i:<3} {row['scenario']:<32} {np.mean(row['params_m']):>10.3f} "
+            f"{np.mean(row['model_size_mb']):>10.3f} {np.mean(row['infer_ms_per_img']):>10.3f} "
+            f"{np.mean(row['throughput_img_s']):>8.2f} {np.mean(row['peak_mem_mb']):>10.2f} "
+            f"{np.mean(row['qwk']):>8.4f}")
+
     lines += ["=" * W2, ""]
     return "\n".join(lines)
+
 
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -546,6 +694,7 @@ def main():
     print("=" * W)
     print(f"  Project root : {PROJECT_ROOT}")
     print(f"  Results dir  : {RESULTS_DIR}")
+    print(f"  Device       : {device}")
 
     print("\n[Dataset]")
     dataset_dir = get_dataset_dir()
@@ -589,14 +738,16 @@ def main():
             print(f"  Evaluating ...")
 
             model.eval()
-            res         = evaluate(model, head, test_loader)
+            res         = evaluate(model, head, test_loader, ckpt_path=ckpt_path)
             res['seed'] = seed
             res['head'] = head
             seed_results.append(res)
             del model
 
             print(f"  QWK={res['qwk']:.4f} | Acc={res['acc']*100:.2f}% | "
-                  f"MAE={res['mae']:.4f} | RMSE={res['rmse']:.4f}")
+                  f"MAE={res['mae']:.4f} | RMSE={res['rmse']:.4f} | "
+                  f"Params={res['params_m']:.2f}M | Size={res['model_size_mb']:.2f}MB | "
+                  f"Lat={res['infer_ms_per_img']:.3f}ms | Mem={res['peak_mem_mb']:.1f}MB")
             sys.stdout.flush()
 
         if not seed_results:
@@ -620,6 +771,11 @@ def main():
             'wtd_p':    [r['wtd_p']      for r in seed_results],
             'wtd_r':    [r['wtd_r']      for r in seed_results],
             'wtd_f1':   [r['wtd_f1']     for r in seed_results],
+            'params_m':          [r['params_m']         for r in seed_results],
+            'model_size_mb':     [r['model_size_mb']    for r in seed_results],
+            'infer_ms_per_img':  [r['infer_ms_per_img'] for r in seed_results],
+            'throughput_img_s':  [r['throughput_img_s'] for r in seed_results],
+            'peak_mem_mb':       [r['peak_mem_mb']      for r in seed_results],
             'per_class': {
                 cls: {
                     'p':  [r['per_class'][cls]['p']  for r in seed_results],
@@ -660,14 +816,16 @@ def main():
         print(f"  Evaluating ...")
 
         model.eval()
-        res          = evaluate(model, head, test_loader)
+        res          = evaluate(model, head, test_loader, ckpt_path=ckpt_path)
         res['head']  = head
         res['arch']  = arch
         res['short'] = scenario['short']
         del model
 
         print(f"  QWK={res['qwk']:.4f} | Acc={res['acc']*100:.2f}% | "
-              f"MAE={res['mae']:.4f} | RMSE={res['rmse']:.4f}")
+              f"MAE={res['mae']:.4f} | RMSE={res['rmse']:.4f} | "
+              f"Params={res['params_m']:.2f}M | Size={res['model_size_mb']:.2f}MB | "
+              f"Lat={res['infer_ms_per_img']:.3f}ms | Mem={res['peak_mem_mb']:.1f}MB")
         sys.stdout.flush()
 
         block    = format_teacher_results(scenario, res)

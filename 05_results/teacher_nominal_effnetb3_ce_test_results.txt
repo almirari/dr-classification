@@ -18,6 +18,14 @@
   Wtd R              0.8256
   Wtd F1             0.8237
 
+  Efficiency            Value
+  ----------------------------
+  Params (M)           10.704
+  Size (MB)            41.373
+  Latency (ms)         77.711
+  Throughput/s          12.87
+  Peak mem (MB)           nan
+
   Class                   Precision     Recall   F1-Score  Support
   --------------------------------------------------------------
   No DR                      0.9730     0.9945     0.9836      181
